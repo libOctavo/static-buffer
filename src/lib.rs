@@ -1,7 +1,10 @@
+#![no_std]
+
 extern crate generic_array;
 extern crate typenum;
 
-use std::fmt;
+use core::fmt;
+use core::cmp;
 
 use generic_array::{ArrayLength, GenericArray};
 use typenum::uint::Unsigned;
@@ -61,18 +64,28 @@ impl<N: ArrayLength<u8>> FixedBuffer<N> {
             position: 0,
         }
     }
+
+    fn fill_up<'a>(&mut self, input: &'a [u8]) -> &'a [u8] {
+        let count = cmp::min(input.len(), self.remaining());
+
+        self.buffer[self.position..(self.position + count)].copy_from_slice(&input[..count]);
+        self.position += count;
+
+        &input[count..]
+    }
 }
 
 impl<N: ArrayLength<u8>> FixedBuf for FixedBuffer<N> {
     #[inline(always)]
     fn input<F: FnMut(&[u8])>(&mut self, input: &[u8], mut func: F) {
-        for &byte in input {
-            if self.position == Self::size() {
-                func(&self.buffer);
-                self.position = 0;
-            }
-            self.buffer[self.position] = byte;
-            self.position += 1;
+        let rest = self.fill_up(input);
+        if rest.is_empty() { return }
+
+        for chunk in rest.chunks(Self::size()) {
+            func(&self.buffer);
+            self.reset();
+
+            self.fill_up(chunk);
         }
     }
 
@@ -183,12 +196,19 @@ mod tests {
     }
 
     #[test]
-    fn fire_function_when_buffer_is_filled() {
+    fn do_fire_function_when_buffer_is_filled() {
+        let mut buf = FixedBuffer::<U2>::new();
+
+        buf.input(&[1, 2], |_| assert!(false, "This should not happen."));
+    }
+
+    #[test]
+    fn fire_function_when_buffer_is_filled_and_there_is_still_data() {
         let mut buf = FixedBuffer::<U2>::new();
         let mut i = false;
 
-        buf.input(&[1, 2], |_| i = true);
+        buf.input(&[1, 2, 3], |_| i = true);
 
-        assert!(i, "Passwd method should be called");
+        assert!(i, "Passed method should be called");
     }
 }
